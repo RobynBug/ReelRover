@@ -1,13 +1,323 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>reel-rover</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reel Rover | Content Discovery</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configure Tailwind for Inter font and basic styling -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#1d4ed8', // Blue-700
+                        secondary: '#f59e0b', // Amber-500
+                        darkbg: '#0f172a', // Slate-900
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar styling */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1e293b; /* Slate-800 */
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #475569; /* Slate-600 */
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #64748b; /* Slate-500 */
+        }
+    </style>
+</head>
+<body class="bg-darkbg text-white font-sans min-h-screen">
+
+    <!-- Header and Search Bar -->
+    <header class="p-6 bg-slate-800 shadow-lg sticky top-0 z-10">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-3xl font-extrabold text-secondary mb-4">Reel Rover Discovery</h1>
+            <div class="flex space-x-3">
+                <input type="text" id="search-input" placeholder="Search movies, TV shows, or people..."
+                       class="flex-grow p-3 rounded-xl border border-slate-700 bg-slate-900 focus:outline-none focus:ring-2 focus:ring-primary text-white placeholder-slate-400 transition duration-300">
+                <button onclick="performSearch()"
+                        class="px-6 py-3 bg-primary text-white font-bold rounded-xl hover:bg-blue-600 transition duration-300 shadow-md transform hover:scale-[1.02]">
+                    Search
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Results Area -->
+    <main class="p-6 max-w-7xl mx-auto">
+        <h2 id="results-title" class="text-xl font-semibold mt-6 mb-4 text-slate-300">Start by searching for content.</h2>
+        <div id="results-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+            <!-- Results cards will be injected here -->
+        </div>
+        <p id="loading-indicator" class="text-center text-primary text-lg font-semibold mt-12 hidden">Loading results...</p>
+    </main>
+
+    <!-- Details Modal (Hidden by default) -->
+    <div id="details-modal" class="fixed inset-0 bg-black bg-opacity-80 z-50 hidden transition-opacity duration-300 flex items-start justify-center p-4">
+        
+        <!-- Modal Content Container -->
+        <div id="modal-content" class="bg-slate-800 rounded-xl shadow-2xl w-full max-w-4xl mt-12 transform scale-95 transition-transform duration-300 overflow-hidden">
+            
+            <!-- Close Button -->
+            <button onclick="closeModal()" class="absolute top-0 right-0 m-4 text-white hover:text-red-500 z-50 text-3xl font-bold p-1 leading-none">
+                &times;
+            </button>
+
+            <!-- Content Placeholder -->
+            <div id="modal-body" class="p-6 custom-scrollbar max-h-[90vh] overflow-y-auto">
+                <!-- Details and trailer content will be injected here -->
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- CONFIGURATION ---
+        // Your backend API should be running on this URL
+        const API_BASE_URL = 'http://localhost:3000/api/content';
+        
+        // --- UTILITY FUNCTIONS ---
+
+        /**
+         * Closes the detail modal.
+         */
+        function closeModal() {
+            const modal = document.getElementById('details-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            
+            // Clear content to stop any video playback
+            document.getElementById('modal-body').innerHTML = '';
+        }
+
+        /**
+         * Displays the detail modal with content.
+         * @param {string} htmlContent - The HTML content to display.
+         */
+        function openModal(htmlContent) {
+            const modal = document.getElementById('details-modal');
+            document.getElementById('modal-body').innerHTML = htmlContent;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        /**
+         * Safely finds the best trailer from the list of videos.
+         * @param {Array} videos - The array of video results from TMDB.
+         * @returns {string|null} The YouTube key of the best trailer, or null.
+         */
+        function getBestTrailerKey(videos) {
+            if (!videos || videos.length === 0) return null;
+
+            // Prioritization logic: Official trailer > Any trailer/teaser
+            const priorityOrder = [
+                (v) => v.site === 'YouTube' && v.type === 'Trailer' && (v.official === true || v.iso_639_1 === 'en'),
+                (v) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'),
+                (v) => v.site === 'YouTube' // Any YouTube video
+            ];
+
+            for (const filter of priorityOrder) {
+                const bestVideo = videos.find(filter);
+                if (bestVideo) {
+                    return bestVideo.key;
+                }
+            }
+
+            return null;
+        }
+
+        // --- CORE APPLICATION LOGIC ---
+
+        /**
+         * Fetches search results from the backend API.
+         */
+        async function performSearch() {
+            const query = document.getElementById('search-input').value;
+            const container = document.getElementById('results-container');
+            const title = document.getElementById('results-title');
+            const loading = document.getElementById('loading-indicator');
+
+            if (query.trim() === '') return;
+
+            container.innerHTML = '';
+            title.textContent = `Searching for "${query}"...`;
+            loading.classList.remove('hidden');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/search?query=${encodeURIComponent(query)}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                displayResults(data.results);
+                
+            } catch (error) {
+                console.error('Search failed:', error);
+                title.textContent = 'Error: Could not connect to the backend.';
+                container.innerHTML = `<p class="text-red-400 mt-4">Failed to load results. Please ensure your Express server is running on port 3000.</p>`;
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Renders the search results as cards.
+         * @param {Array} results - The array of TMDB search results.
+         */
+        function displayResults(results) {
+            const container = document.getElementById('results-container');
+            const title = document.getElementById('results-title');
+            container.innerHTML = '';
+            
+            const filteredResults = results.filter(item => 
+                (item.media_type === 'movie' || item.media_type === 'tv' || item.media_type === 'person')
+            );
+            
+            title.textContent = `Found ${filteredResults.length} results:`;
+
+            if (filteredResults.length === 0) {
+                container.innerHTML = '<p class="text-slate-400 col-span-full">No movies, TV shows, or people found.</p>';
+                return;
+            }
+
+            filteredResults.forEach(item => {
+                const titleText = item.title || item.name;
+                const releaseYear = item.release_date ? item.release_date.split('-')[0] : (item.first_air_date ? item.first_air_date.split('-')[0] : 'N/A');
+                const posterPath = item.poster_path || item.profile_path;
+                const mediaType = item.media_type === 'tv' ? 'TV Show' : (item.media_type === 'movie' ? 'Movie' : 'Person');
+                const imageURL = posterPath ? `https://image.tmdb.org/t/p/w300${posterPath}` : 'https://placehold.co/300x450/1e293b/94a3b8?text=NO+IMAGE';
+
+                const card = document.createElement('div');
+                card.className = 'bg-slate-800 rounded-xl shadow-lg overflow-hidden cursor-pointer hover:shadow-xl hover:ring-2 hover:ring-secondary transition duration-300 group';
+                
+                card.innerHTML = `
+                    <div class="h-60 sm:h-72 overflow-hidden">
+                        <img src="${imageURL}" alt="${titleText}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" onerror="this.onerror=null;this.src='https://placehold.co/300x450/1e293b/94a3b8?text=NO+IMAGE';">
+                    </div>
+                    <div class="p-3">
+                        <p class="text-sm font-light text-slate-400">${mediaType}${item.media_type !== 'person' ? ` (${releaseYear})` : ''}</p>
+                        <h3 class="text-base font-semibold truncate group-hover:text-secondary transition duration-300">${titleText}</h3>
+                    </div>
+                `;
+                
+                card.onclick = () => showDetails(item.id, item.media_type);
+                container.appendChild(card);
+            });
+        }
+        
+        /**
+         * Fetches and displays detailed information for a content item in a modal.
+         * @param {number} id - TMDB ID of the content.
+         * @param {string} mediaType - Type of content ('movie', 'tv', 'person').
+         */
+        async function showDetails(id, mediaType) {
+            const modalBody = document.getElementById('modal-body');
+            modalBody.innerHTML = `<div class="text-center py-10"><p class="text-lg text-primary font-semibold">Loading details...</p></div>`;
+            openModal(modalBody.innerHTML); // Open modal with loading state
+
+            try {
+                // Ensure the mediaType is passed to the backend for correct routing (e.g., ?mediaType=tv)
+                const response = await fetch(`${API_BASE_URL}/details/${id}?mediaType=${mediaType}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const details = await response.json();
+                
+                // Get the video key
+                const trailerKey = details.videos ? getBestTrailerKey(details.videos.results) : null;
+                const videoIframe = trailerKey 
+                    ? `<div class="aspect-w-16 aspect-h-9 mb-6 rounded-lg overflow-hidden relative" style="padding-bottom: 56.25%;">
+                         <iframe class="absolute top-0 left-0 w-full h-full" src="https://www.youtube.com/embed/${trailerKey}" 
+                                 frameborder="0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
+                       </div>`
+                    : '<div class="bg-slate-700 p-4 rounded-lg mb-6 text-center"><p class="text-slate-400">No trailer available for this content.</p></div>';
+
+                // Format overview
+                const overview = details.overview || details.biography || 'No description available.';
+                
+                // Construct and display the details HTML
+                const modalHtml = `
+                    <div class="flex flex-col lg:flex-row space-y-4 lg:space-y-0 lg:space-x-6">
+                        <!-- Image Column -->
+                        <div class="flex-shrink-0 w-full lg:w-1/3">
+                            <img src="${details.poster_path || details.profile_path ? `https://image.tmdb.org/t/p/w500${details.poster_path || details.profile_path}` : 'https://placehold.co/500x750/1e293b/94a3b8?text=NO+IMAGE'}" 
+                                 alt="${details.title || details.name}" class="rounded-lg shadow-xl w-full">
+                        </div>
+                        
+                        <!-- Info Column -->
+                        <div class="lg:w-2/3">
+                            <h2 class="text-3xl font-bold text-secondary mb-2">${details.title || details.name}</h2>
+                            <p class="text-sm text-slate-400 mb-4">${mediaType.toUpperCase()} | ${details.runtime ? `${details.runtime} mins` : (details.episode_run_time ? `${details.episode_run_time[0]} mins/ep` : details.birthday || '')}</p>
+                            
+                            <h3 class="text-lg font-semibold mb-2">Overview</h3>
+                            <p class="text-slate-300 mb-6 text-sm">${overview}</p>
+
+                            ${(details.genres && details.genres.length > 0) ? `
+                                <h3 class="text-lg font-semibold mb-2">Genres</h3>
+                                <p class="text-sm text-slate-300 mb-6">${details.genres.map(g => g.name).join(', ')}</p>
+                            ` : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6">
+                        <h3 class="text-xl font-bold mb-4 text-primary">Trailer</h3>
+                        ${videoIframe}
+                    </div>
+                `;
+                
+                openModal(modalHtml);
+                
+            } catch (error) {
+                console.error('Failed to load details:', error);
+                modalBody.innerHTML = `<div class="text-center py-10"><p class="text-lg text-red-500 font-semibold">Error: Could not fetch details for this item.</p></div>`;
+            }
+        }
+
+        /**
+         * Event listener attached to the window load event.
+         */
+        window.onload = function() {
+            const modal = document.getElementById('details-modal');
+
+            // *** FIX: Listener to close modal on backdrop click ***
+            // We listen for a click on the modal container itself.
+            modal.addEventListener('click', function(event) {
+                // If the click target is the modal container (the dark backdrop) 
+                // and not one of its children (the white content box), close it.
+                if (event.target === modal) {
+                    closeModal();
+                }
+            });
+            
+            // Add event listener to input to allow searching on Enter key press
+            document.getElementById('search-input').addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    performSearch();
+                }
+            });
+            
+            // Initial search (optional, for testing)
+            // performSearch(); 
+        };
+    </script>
+</body>
 </html>

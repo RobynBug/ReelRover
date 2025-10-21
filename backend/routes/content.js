@@ -34,21 +34,30 @@ contentRouter.get('/search', async (req, res) => {
   }
 });
 
-// Endpoint 2: Get Content Details
+// Endpoint 2: Get Content Details (FIXED: Now handles movie, tv, and person types)
 
 contentRouter.get('/details/:tmdbId', async (req, res) => {
     // Extract the TMDB ID from the URL path
     const tmdbId = req.params.tmdbId;
+    
+    // *** NEW: Extract the mediaType from the query parameters ***
+    const mediaType = req.query.mediaType; 
 
     if (isNaN(parseInt(tmdbId))) {
         return res.status(400).json({ error: 'Invalid TMDB ID provided.' });
     }
+    
+    if (!mediaType || (mediaType !== 'movie' && mediaType !== 'tv' && mediaType !== 'person')) {
+        return res.status(400).json({ error: 'Valid mediaType (movie, tv, or person) is required.' });
+    }
 
     try {
-        // Construct the TMDB endpoint path to get movie details, appending credits and videos
-        const endpoint = `/movie/${tmdbId}?append_to_response=credits,videos`;
+        // *** FIX: Dynamically construct the endpoint path based on mediaType ***
+        const appendToResponse = (mediaType === 'person') ? 'combined_credits' : 'credits,videos';
         
-        // Call the service function with the endpoint
+        const endpoint = `/${mediaType}/${tmdbId}?append_to_response=${appendToResponse}`;
+        
+        // Call the service function with the correct endpoint
         const details = await fetchTMDB(endpoint);
         
         // Send the details back to the client

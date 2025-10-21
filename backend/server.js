@@ -4,6 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 
+import contentRouter from './routes/content.js';
 import authRouter from './routes/auth.js'; 
 import watchlistRouter from './routes/watchlist.js'; 
 import historyRouter from './routes/history.js'; 
@@ -53,6 +54,9 @@ app.use('/api/auth', authRouter);
 // PHASE 2: CONTENT ROUTES (Protected by authenticateToken)
 app.use('/api/watchlist', authenticateToken, watchlistRouter);
 app.use('/api/history', authenticateToken, historyRouter);
+
+//external route
+app.use('/api/content', contentRouter);
 
 const startServer = async () => {
     try {
