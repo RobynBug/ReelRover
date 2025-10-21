@@ -1,24 +1,26 @@
-
 import express from 'express';
-import { prisma } from '../db.js';
+// Assuming db.js is one level up
+import { prisma } from '../db.js'; 
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken'; 
+import dotenv from 'dotenv';
 
-const app = express();
-app.use(express.json());
+dotenv.config();
+
+
+const authRouter = express.Router();
+
+
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 
-// Registration Route
-
-const registration = () =>{
-
-app.post('/api/auth/register', async (req, res) => {
+// --- Registration Route (POST /register) ---
+authRouter.post('/register', async (req, res) => {
   try {
     const { email, password } = req.body;
 
     // Basic validation
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    if (!email || !password || password.length < 8) {
+      return res.status(400).json({ error: 'Email is required and password must be at least 8 characters long.' });
     }
 
     // Check if user already exists
@@ -30,12 +32,14 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(409).json({ error: 'User already exists' });
     }
 
+    // FIX 4: Use 'const' or 'let' to declare the passwordHash variable
+    const passwordHash = await bcrypt.hash(password, 10);
+    
     // Create new user
-    passwordHash = await bcrypt.hash(password, 10);
     const newUser = await prisma.user.create({
       data: {
         email,
-        passwordHash,
+        passwordHash, // Use the declared constant
       },
     });
 
@@ -43,14 +47,15 @@ app.post('/api/auth/register', async (req, res) => {
   } catch (err) {
     console.error('Error during registration:', err);
     res.status(500).json({ error: 'Internal server error' });
-    }
+  }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+// --- Login Route (POST /login) ---
+authRouter.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const passwordHash = await bcrypt.hash(password, 10);
-
+    
+    
     // Basic validation
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
@@ -61,12 +66,18 @@ app.post('/api/auth/login', async (req, res) => {
       where: { email },
     });
 
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Compare HASHED passwords
     const isMatch = await bcrypt.compare(password, user.passwordHash);
 
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    // Issue JWT 
     const token = jwt.sign(
         { userId: user.id, email: user.email }, 
         JWT_SECRET, 
@@ -80,6 +91,6 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-}
 
-export default registration;
+// FIX 6: Export the Router itself, not a wrapper function
+export default authRouter;
